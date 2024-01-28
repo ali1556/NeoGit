@@ -1,3 +1,4 @@
 # NeoGit
-Ali Nouri\n
+Ali Nouri
+
 StudentID = 402106734
