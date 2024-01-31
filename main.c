@@ -9,19 +9,21 @@
 #include <dirent.h>
 #include <time.h>
 #include <libgen.h>
-#define MAX_MESSAGE_LENGTH 73
-#define MAX_FILENAME_LENGTH 257
-#define MAX_LINE_LENGTH 1025
+
 int numbOfAdds = 0;
 int UserNameIsGlobal = 0;
 int EmailIsGlobal = 0;
-char *CurrentBranch;
+char CurrentBranch[100] = "master";
+
+#define MAX_MESSAGE_LENGTH 73
+#define MAX_FILENAME_LENGTH 257
+#define MAX_LINE_LENGTH 1025
+#define ALIAS_FILE ".neogit/alias"
 #define CONFIG_FILE ".neogit/config"
-#define STAGING_FILE ".neogit/staging"
-#define TRACKS_FILE ".neogit/tracks"
-#define COMMITS_DIR ".neogit/commits/"
-#define FILES_DIR ".neogit/files/"
 #define GCONFIG_FILE "/Users/alinr/Desktop/config.txt"
+
+#define debug(x) printf("%s", x);
+
 bool is_neogit_initialized()
 {
     char cwd[1024];
@@ -57,23 +59,34 @@ bool is_neogit_initialized()
 }
 
 // FUNCTION DECLARATIONS
+
 int config(char *username, char *email, int isGlobal);
 int run_init(int argc, char *const argv[]);
+
 //
+
 int run_add(int argc, char *const argv[]);
 int is_directory(char *path);
 int add_to_staging(char *path);
 int add_directory_contents(char *dir_path);
+
 //
+
 int compareFiles(const char *file1Path, const char *file2Path);
+
 //
+
 int run_reset(int argc, char *const argv[]);
 int reset_file(char *filepath);
 int undo_last_add();
+
 //
+
 int is_file_in_staging(const char *filename);
 int status();
+
 //
+
 int run_commit(int argc, char *const argv[]);
 int inc_last_commit_ID();
 bool check_file_directory_exists(char *filepath);
@@ -82,15 +95,32 @@ int track_file(char *filepath);
 bool is_tracked(char *filepath);
 int create_commit_file(int commit_ID, char *message);
 int find_file_last_commit(char *filepath);
+
 //
+
 int showlog();
 int showlogn(int n);
 int findHighestFileNumber();
+
 //
+
 int branch(char *path);
 void copyFolder(const char *src, const char *dest);
 int showBranches();
+
+//
+
+int comcheckout(char *commitID);
+int checkout(char *branchname);
+
+//
+
+void add_alias(const char *alias, const char *command);
+void read_aliases();
+void execute_alias(const char *alias);
+
 //////////////////////////////////////////////////////
+
 int main(int argc, char *argv[])
 {
     if (argc < 2)
@@ -98,6 +128,18 @@ int main(int argc, char *argv[])
         fprintf(stdout, "Invalid command!\n");
         return 1;
     }
+
+    else if (strcmp(argv[1], "init") == 0)
+    {
+        return run_init(argc, argv);
+    }
+    if (!is_neogit_initialized())
+    {
+        printf("Neogit has not been initialized yet!\n");
+        return 1;
+    }
+
+    execute_alias(argv[1]);
 
     if (strcmp(argv[1], "config") == 0)
     {
@@ -112,19 +154,34 @@ int main(int argc, char *argv[])
                 return config("", argv[4], 1);
             }
         }
+        else if (strncmp(argv[2], "alias.", 6) == 0)
+        {
+            if (argc >= 4)
+            {
+                const char *alias_with_prefix = argv[2];
+                const char *alias_name = alias_with_prefix + 6;
+                const char *command = argv[3];
+                add_alias(alias_name, command);
+                return 0;
+            }
+            else
+            {
+                fprintf(stdout, "Invalid alias configuration!\n");
+                return 1;
+            }
+        }
     }
-    else if (strcmp(argv[1], "init") == 0)
-    {
-        return run_init(argc, argv);
-    }
-    if (!is_neogit_initialized())
-    {
-        printf("Neogit has not been initialized yet!\n");
-        return 1;
-    }
+
     else if (strcmp(argv[1], "add") == 0)
     {
-        return run_add(argc, argv);
+        if (strcmp(argv[2], "-n") != 0)
+        {
+            return run_add(argc, argv);
+        }
+        else if (strcmp(argv[2], "-n") == 0)
+        {
+            return status();
+        }
     }
     else if (strcmp(argv[1], "reset") == 0)
     {
@@ -137,7 +194,7 @@ int main(int argc, char *argv[])
             return run_reset(argc, argv);
         }
     }
-    else if ((strcmp(argv[1], "status") == 0) || ((strcmp(argv[1], "add") == 0) && (strcmp(argv[2], "-n") == 0)))
+    else if ((strcmp(argv[1], "status") == 0))
     {
         return status();
     }
@@ -158,20 +215,23 @@ int main(int argc, char *argv[])
     {
         return branch(argv[2]);
     }
-    else if (strcmp(argv[1], "branch") == 0)
-    {
-        return branch(argv[2]);
-    }
     else if (strcmp(argv[1], "branches") == 0)
     {
         return showBranches();
+    }
+    else if (strcmp(argv[1], "checkout") == 0)
+    {
+        return checkout(argv[2]);
     }
 
     fprintf(stdout, "Invalid command!\n");
     return 1;
 }
+
 ///////////////////////////////////////////////////
+
 // config & init
+
 int config(char *username, char *email, int isGlobal)
 {
     FILE *file = fopen(GCONFIG_FILE, "r+");
@@ -254,6 +314,9 @@ int create_configs(char *username, char *email)
     fclose(file);
 
     file = fopen(".neogit/shortcuts", "w");
+    fclose(file);
+
+    file = fopen(".neogit/alias", "w");
     fclose(file);
 
     return 0;
@@ -345,7 +408,9 @@ int run_init(int argc, char *const argv[])
     }
     return 0;
 }
+
 // add
+
 int run_add(int argc, char *const argv[])
 {
     if (argc < 3)
@@ -507,7 +572,9 @@ int add_directory_contents(char *dir_path)
     closedir(dir);
     return 0;
 }
+
 // function to compare
+
 int compareFiles(const char *file1Path, const char *file2Path)
 {
     FILE *file1 = fopen(file1Path, "rb");
@@ -558,7 +625,9 @@ int compareFiles(const char *file1Path, const char *file2Path)
 
     return (result == 0) ? 0 : 1;
 }
+
 // reset
+
 int run_reset(int argc, char *const argv[])
 {
     if (argc < 3)
@@ -835,7 +904,9 @@ int undo_last_add()
 
     return 0;
 }
+
 // status
+
 int is_file_in_staging(const char *filename)
 {
     FILE *staging_file = fopen(".neogit/staging", "r");
@@ -887,7 +958,9 @@ int status()
 
     return 0;
 }
+
 // commit
+
 int run_commit(int argc, char *const argv[])
 {
     if (argc < 4)
@@ -994,7 +1067,6 @@ int run_commit(int argc, char *const argv[])
 
     return 0;
 }
-
 int inc_last_commit_ID()
 {
     FILE *file = fopen(".neogit/config", "r");
@@ -1219,6 +1291,12 @@ int showlog()
 
     int commitnumb = findHighestFileNumber();
 
+    if (!commitnumb)
+    {
+        printf("No commits found!\n");
+        return 1;
+    }
+
     for (int i = commitnumb; i >= 1; i--)
     {
         printf("\n");
@@ -1325,6 +1403,12 @@ int showlogn(int n)
 
     int commitnumb = findHighestFileNumber();
 
+    if (!commitnumb)
+    {
+        printf("No commits found!\n");
+        return 1;
+    }
+
     for (int i = commitnumb; i > commitnumb - n; i--)
     {
         printf("\n");
@@ -1428,6 +1512,7 @@ int showlogn(int n)
 }
 
 // branch
+
 void copyFolder(const char *src, const char *dest)
 {
     char command[200];
@@ -1451,14 +1536,6 @@ int branch(char *branchName)
         return 1;
     }
 
-    CurrentBranch = malloc(strlen(branchName) + 1);
-
-    if (CurrentBranch == NULL)
-    {
-        fprintf(stderr, "Error allocating memory for CurrentBranch\n");
-        return 1;
-    }
-
     strcpy(CurrentBranch, branchName);
 
     printf("Branch '%s' created successfully.\n", branchName);
@@ -1478,10 +1555,9 @@ int branch(char *branchName)
     {
         printf("No commits found.\n");
     }
-
+    printf("current branch -> %s", CurrentBranch);
     return 0;
 }
-
 int showBranches()
 {
     DIR *dir;
@@ -1496,7 +1572,15 @@ int showBranches()
         {
             if (ent->d_type == DT_DIR && ent->d_name[0] != '.')
             {
-                printf("- %s\n", ent->d_name);
+                if (ent->d_name == CurrentBranch)
+                {
+                    printf("- %s -> current branch\n", ent->d_name);
+                }
+                else
+                {
+                    printf("- %s\n", ent->d_name);
+                }
+                printf("%s", CurrentBranch);
             }
         }
 
@@ -1507,4 +1591,116 @@ int showBranches()
         perror("Error opening branches directory");
     }
     return 0;
+}
+
+// checkout
+
+int checkout(char *branchname)
+{
+    DIR *dir;
+    struct dirent *ent;
+
+    dir = opendir(".neogit/branches");
+
+    if (dir == NULL)
+    {
+        perror("Error opening branches directory");
+        return 1;
+    }
+
+    while ((ent = readdir(dir)) != NULL)
+    {
+        if (ent->d_type == DT_DIR && strcmp(ent->d_name, ".") != 0 && strcmp(ent->d_name, "..") != 0)
+        {
+            if (strcmp(ent->d_name, branchname) == 0)
+            {
+                strcpy(CurrentBranch, branchname);
+                printf("Switched to branch '%s'.\n", branchname);
+                closedir(dir);
+                return 0;
+            }
+        }
+    }
+
+    fprintf(stderr, "Error: Branch '%s' not found.\n", branchname);
+    closedir(dir);
+    return 1;
+}
+// int comcheckout(char *commitID)
+
+// alias
+
+void add_alias(const char *alias, const char *command)
+{
+    FILE *file = fopen(ALIAS_FILE, "a");
+    if (file == NULL)
+    {
+        perror("Error opening alias file for writing");
+        exit(EXIT_FAILURE);
+    }
+
+    // gotta change the ./neogit here to neogit in release
+
+    if (strncmp(command, "./neogit", 8) != 0)
+    {
+        printf("You cannot add an invalid command as an alias!\n");
+        return;
+    }
+
+    fprintf(file, "%s=%s\n", alias, command);
+    printf("Alias added successfully: %s -> %s\n", alias, command);
+    fclose(file);
+}
+void read_aliases()
+{
+    FILE *file = fopen(ALIAS_FILE, "r");
+    if (file == NULL)
+    {
+        perror("Error opening alias file for reading");
+        exit(EXIT_FAILURE);
+    }
+
+    char line[100];
+    while (fgets(line, sizeof(line), file) != NULL)
+    {
+        char *stored_alias = strtok(line, "=");
+        char *stored_command = strtok(NULL, "\n");
+
+        if (stored_alias != NULL && stored_command != NULL)
+        {
+            printf("Alias: %s, Command: %s\n", stored_alias, stored_command);
+        }
+    }
+
+    fclose(file);
+}
+void execute_alias(const char *alias)
+{
+    FILE *file = fopen(ALIAS_FILE, "r");
+    if (file == NULL)
+    {
+        perror("Error opening alias file for reading");
+        return;
+    }
+
+    char line[100];
+    while (fgets(line, sizeof(line), file) != NULL)
+    {
+        char *stored_alias = strtok(line, "=");
+        char *stored_command = strtok(NULL, "\n");
+
+        if (stored_alias != NULL && stored_command != NULL && strcmp(alias, stored_alias) == 0)
+        {
+
+            char trimmed_command[100];
+            sscanf(stored_command, " %99[^\t\n]", trimmed_command);
+
+            char full_command[200];
+            snprintf(full_command, sizeof(full_command), "%s", trimmed_command);
+            system(full_command);
+            break;
+        }
+    }
+
+    fclose(file);
 }
