@@ -13,7 +13,7 @@
 int numbOfAdds = 0;
 int UserNameIsGlobal = 0;
 int EmailIsGlobal = 0;
-char CurrentBranch[100] = "master";
+char CurrentBranch[100] = "master"; // too branch write commit dorost update nemishe    
 
 #define MAX_MESSAGE_LENGTH 73
 #define MAX_FILENAME_LENGTH 257
@@ -119,6 +119,15 @@ void add_alias(const char *alias, const char *command);
 void read_aliases();
 void execute_alias(const char *alias);
 
+//
+
+void add_shortcut(const char *shortcut_name, const char *shortcut_message);
+const char *get_shortcut_message(const char *shortcut_name);
+int replace_shortcut(const char *shortcut_name, const char *new_message);
+int remove_shortcut(const char *shortcut_name);
+
+//
+
 //////////////////////////////////////////////////////
 
 int main(int argc, char *argv[])
@@ -200,7 +209,22 @@ int main(int argc, char *argv[])
     }
     else if (strcmp(argv[1], "commit") == 0)
     {
-        return run_commit(argc, argv);
+        if (argc == 4 && strcmp(argv[2], "-m") == 0)
+        {
+            const char *message = argv[3];
+
+            const char *shortcut_message = get_shortcut_message(message);
+            if (shortcut_message != NULL)
+            {
+                strcpy(argv[3], get_shortcut_message(argv[3]));
+            }
+            return run_commit(argc, argv);
+        }
+        else
+        {
+            fprintf(stdout, "Invalid commit command!\n");
+            return 1;
+        }
     }
     else if (strcmp(argv[1], "log") == 0)
     {
@@ -222,6 +246,33 @@ int main(int argc, char *argv[])
     else if (strcmp(argv[1], "checkout") == 0)
     {
         return checkout(argv[2]);
+    }
+    else if (strcmp(argv[1], "set") == 0)
+    {
+        if (argc == 6 && strcmp(argv[2], "-m") == 0 && strcmp(argv[4], "-s") == 0)
+        {
+            const char *shortcut_message = argv[3];
+            const char *shortcut_name = argv[5];
+            add_shortcut(shortcut_name, shortcut_message);
+            printf("Shortcut set successfully: %s -> %s\n", shortcut_name, shortcut_message);
+            return 0;
+        }
+        else
+        {
+            fprintf(stdout, "Invalid set command!\n");
+            return 1;
+        }
+    }
+    else if (strcmp(argv[1], "replace") == 0)
+    {
+        if (strcmp(argv[2], "-m") == 0 && strcmp(argv[4], "-s") == 0)
+        {
+            return replace_shortcut(argv[5], argv[3]);
+        }
+    }
+    else if (strcmp(argv[1], "remove") == 0 && strcmp(argv[2], "-s") == 0)
+    {
+        return remove_shortcut(argv[3]);
     }
 
     fprintf(stdout, "Invalid command!\n");
@@ -1208,6 +1259,7 @@ int create_commit_file(int commit_ID, char *message)
 
     fprintf(file, "datetime: %s\n", datetime_str);
     fprintf(file, "message: %s\n", message);
+    fprintf(file, "branch: %s\n", CurrentBranch);
     fprintf(file, "files:\n");
 
     DIR *dir = opendir(".");
@@ -1254,7 +1306,9 @@ int find_file_last_commit(char *filepath)
 
     return max;
 }
+
 // log
+
 int findHighestFileNumber()
 {
     DIR *dir;
@@ -1336,11 +1390,16 @@ int showlog()
                 sscanf(line, "datetime: %s %s", dateOfCommit, hour);
                 printf("Date and Time of commit: %s %s\n", dateOfCommit, hour);
             }
+            else if (strncmp(line, "branch:", 7) == 0){
+                sscanf(line, "branch: %s", branch);
+                printf("branch : %s\n", branch);
+            }
             else if (strncmp(line, "message:", 8) == 0)
             {
                 sscanf(line, "message: %[^\n]", message);
                 printf("Commit message: %s\n", message);
             }
+            // else if (strncmp(line, "branch"))
             else if (strncmp(line, "files:", 6) == 0)
             {
                 while (fgets(line, sizeof(line), file) != NULL)
@@ -1555,7 +1614,7 @@ int branch(char *branchName)
     {
         printf("No commits found.\n");
     }
-    printf("current branch -> %s", CurrentBranch);
+    printf("current branch -> %s\n", CurrentBranch);
     return 0;
 }
 int showBranches()
@@ -1703,4 +1762,152 @@ void execute_alias(const char *alias)
     }
 
     fclose(file);
+}
+
+// shortcuts
+// there is an error with identifying messages and shortcut names
+
+void add_shortcut(const char *shortcut_name, const char *shortcut_message)
+{
+    FILE *file = fopen(".neogit/shortcuts", "a");
+    if (file == NULL)
+    {
+        perror("Error opening shortcuts file for writing");
+        exit(EXIT_FAILURE);
+    }
+
+    fprintf(file, "%s=%s\n", shortcut_name, shortcut_message);
+    fclose(file);
+}
+const char *get_shortcut_message(const char *shortcut_name)
+{
+    FILE *file = fopen(".neogit/shortcuts", "r");
+    if (file == NULL)
+    {
+        perror("Error opening shortcuts file for reading");
+        exit(EXIT_FAILURE);
+    }
+
+    char line[MAX_MESSAGE_LENGTH + MAX_MESSAGE_LENGTH + 2];
+    while (fgets(line, sizeof(line), file) != NULL)
+    {
+        char *stored_shortcut = strtok(line, "=");
+        char *stored_message = strtok(NULL, "\n");
+
+        if (stored_shortcut != NULL && stored_message != NULL && strcmp(shortcut_name, stored_shortcut) == 0)
+        {
+            return stored_message;
+        }
+    }
+
+    fclose(file);
+    return NULL; // Shortcut not found
+}
+int replace_shortcut(const char *shortcut_name, const char *new_message)
+{
+    const char *shortcuts_file_path = ".neogit/shortcuts";
+
+    FILE *file = fopen(shortcuts_file_path, "r");
+    if (file == NULL)
+    {
+        perror("Error opening shortcuts file for reading");
+        exit(EXIT_FAILURE);
+    }
+
+    FILE *temp_file = fopen(".neogit/temp_shortcuts", "w");
+    if (temp_file == NULL)
+    {
+        perror("Error opening temp file for writing");
+        fclose(file);
+        exit(EXIT_FAILURE);
+    }
+
+    char line[MAX_MESSAGE_LENGTH + 22];
+    int found = 0;
+
+    while (fgets(line, sizeof(line), file) != NULL)
+    {
+        char *stored_shortcut = strtok(line, "=");
+        char *stored_message = strtok(NULL, "\n");
+
+        if (stored_shortcut != NULL && stored_message != NULL && strcmp(shortcut_name, stored_shortcut) == 0)
+        {
+            fprintf(temp_file, "%s=%s\n", shortcut_name, new_message);
+            found = 1;
+        }
+        else
+        {
+            fprintf(temp_file, "%s", line);
+        }
+    }
+
+    fclose(file);
+    fclose(temp_file);
+
+    if (!found)
+    {
+        fprintf(stdout, "Shortcut not found: %s\n", shortcut_name);
+        remove(".neogit/temp_shortcuts");
+        return 0;
+    }
+
+    remove(shortcuts_file_path);
+    rename(".neogit/temp_shortcuts", shortcuts_file_path);
+
+    printf("Shortcut replaced successfully: %s -> %s\n", shortcut_name, new_message);
+
+    return 0;
+}
+int remove_shortcut(const char *shortcut_name)
+{
+    const char *shortcuts_file_path = ".neogit/shortcuts";
+
+    FILE *file = fopen(shortcuts_file_path, "r");
+    if (file == NULL)
+    {
+        perror("Error opening shortcuts file for reading");
+        return 1;
+    }
+
+    FILE *temp_file = fopen(".neogit/temp_shortcuts", "w");
+    if (temp_file == NULL)
+    {
+        perror("Error opening temp file for writing");
+        fclose(file);
+        return 1; // Return 1 to indicate an error
+    }
+
+    char line[MAX_MESSAGE_LENGTH + 52];
+    int found = 0;
+
+    while (fgets(line, sizeof(line), file) != NULL)
+    {
+        char *stored_shortcut = strtok(line, "=");
+        char *stored_message = strtok(NULL, "\n");
+
+        if (stored_shortcut != NULL && stored_message != NULL && strcmp(shortcut_name, stored_shortcut) == 0)
+        {
+            found = 1;
+        }
+        else
+        {
+            fprintf(temp_file, "%s", line);
+        }
+    }
+
+    fclose(file);
+    fclose(temp_file);
+
+    if (!found)
+    {
+        fprintf(stdout, "Shortcut not found: %s\n", shortcut_name);
+        remove(".neogit/temp_shortcuts");
+        return 1;
+    }
+
+    remove(shortcuts_file_path);
+    rename(".neogit/temp_shortcuts", shortcuts_file_path);
+
+    printf("Shortcut removed successfully: %s\n", shortcut_name);
+    return 0;
 }
