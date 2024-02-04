@@ -10,17 +10,38 @@
 #include <time.h>
 #include <libgen.h>
 
+
 int numbOfAdds = 0;
-int UserNameIsGlobal = 0;
-int EmailIsGlobal = 0;
-char CurrentBranch[100] = "master"; // too branch write commit dorost update nemishe    
+int UserNameIsGlobal() {
+    FILE *file = fopen(".neogit/isglobal", "r");
+    
+    if (file != NULL) {
+        int value;
+        if (fscanf(file, "%d", &value) == 1) {
+            fclose(file);
+            return value;
+        }
+        fclose(file);
+    }
+
+    return -1;
+}
+char CurrentBranch[100] = "master"; // too branch write commit dorost update nemishe
 
 #define MAX_MESSAGE_LENGTH 73
 #define MAX_FILENAME_LENGTH 257
 #define MAX_LINE_LENGTH 1025
 #define ALIAS_FILE ".neogit/alias"
 #define CONFIG_FILE ".neogit/config"
-#define GCONFIG_FILE "/Users/alinr/Desktop/config.txt"
+#define GCONFIG_FILE ".neogit/gconfig"
+#define TMP_FILE ".neogit/gconfig.tmp"
+
+
+#define RED "\x1b[31m"
+#define GREEN "\x1b[32m"
+#define YELLOW "\x1b[33m"
+#define BLUE "\x1b[34m"
+#define RESET "\x1b[0m"
 
 #define debug(x) printf("%s", x);
 
@@ -101,7 +122,10 @@ int find_file_last_commit(char *filepath);
 int showlog();
 int showlogn(int n);
 int findHighestFileNumber();
-
+int showlogBranch(char *branchname);
+int showlogAuthor(char *author);
+int logBefore(char *time);
+int logSince(char *targetDate);
 //
 
 int branch(char *path);
@@ -128,7 +152,21 @@ int remove_shortcut(const char *shortcut_name);
 
 //
 
-//////////////////////////////////////////////////////
+void createRevertCommit(int commitID, const char *message);
+void deleteCommitsAfter(char *commitID);
+void deleteCommitsByID(char *commitID);
+int revert(char *commitID);
+
+//
+
+int neogit_diff(const char *file1, const char *file2, int line1_start, int line1_end, int line2_start, int line2_end);
+int compareLines(const char *line1, const char *line2);
+
+//
+
+int create_tag(const char *tag_name, const char *message, int cgiven ,int commitid, int force);
+
+//////////////////////////MAIN FUNCTION////////////////////////////
 
 int main(int argc, char *argv[])
 {
@@ -233,6 +271,22 @@ int main(int argc, char *argv[])
             int n = atoi(argv[3]);
             return showlogn(n);
         }
+        else if (argc >= 4 && strcmp(argv[2], "-branch") == 0)
+        {
+            return showlogBranch(argv[3]);
+        }
+        else if (argc >= 4 && strcmp(argv[2], "-author") == 0)
+        {
+            return showlogAuthor(argv[3]);
+        }
+        else if (argc >= 4 && strcmp(argv[2], "-before") == 0)
+        {
+            return logBefore(argv[3]);
+        }
+        else if (argc >= 4 && strcmp(argv[2], "-since") == 0)
+        {
+            return logSince(argv[3]);
+        }
         return showlog();
     }
     else if (strcmp(argv[1], "branch") == 0)
@@ -274,6 +328,60 @@ int main(int argc, char *argv[])
     {
         return remove_shortcut(argv[3]);
     }
+    // else if (strcmp(argv[1], "revert") == 0)
+    // {
+    //     return revert(argv[2]);
+    // }
+    else if (strcmp(argv[1], "diff") == 0) {
+        const char *file1 = argv[3];
+        const char *file2 = argv[4];
+        int line1_start = 0, line1_end = 0, line2_start = 0, line2_end = 0;
+
+        for (int i = 5; i < argc; i++) {
+            if (strcmp(argv[i], "-line1") == 0 && i + 1 < argc) {
+                sscanf(argv[i + 1], "%d-%d", &line1_start, &line1_end);
+                i++;
+            } else if (strcmp(argv[i], "-line2") == 0 && i + 1 < argc) {
+                sscanf(argv[i + 1], "%d-%d", &line2_start, &line2_end);
+                i++;
+            }
+        }
+
+        return neogit_diff(file1, file2, line1_start, line1_end, line2_start, line2_end);
+    }
+    else if (strcmp(argv[1], "tag") == 0)
+    {
+        if (argc < 3)
+        {
+            fprintf(stdout, "Invalid tag command!\n");
+            return 1;
+        }
+
+        const char *tag_name = argv[2];
+        const char *message = NULL;
+        int custom_commit_id = -1;
+        int force = 0;
+
+        for (int i = 3; i < argc; i++)
+        {
+            if (strcmp(argv[i], "-m") == 0 && i + 1 < argc)
+            {
+                message = argv[i + 1];
+                i++;
+            }
+            else if (strcmp(argv[i], "-c") == 0 && i + 1 < argc)
+            {
+                custom_commit_id = atoi(argv[i + 1]);
+                i++;
+            }
+            else if (strcmp(argv[i], "-f") == 0)
+            {
+                force = 1;
+            }
+        }
+
+        return create_tag(tag_name, message, custom_commit_id != -1, custom_commit_id, force);
+    }
 
     fprintf(stdout, "Invalid command!\n");
     return 1;
@@ -281,13 +389,77 @@ int main(int argc, char *argv[])
 
 ///////////////////////////////////////////////////
 
-// config & init
+char *extractUsername()
+{
+    char *author = NULL;
+    char line[MAX_LINE_LENGTH];
+    FILE *configFile;
 
+    if (UserNameIsGlobal())
+    {
+        configFile = fopen(".neogit/gconfig", "r");
+    }
+    else
+    {
+        configFile = fopen(".neogit/config", "r");
+    }
+
+    if (configFile == NULL)
+    {
+        perror("Error opening config file");
+        return NULL;
+    }
+
+    while (fgets(line, sizeof(line), configFile) != NULL)
+    {
+        int length = strlen(line);
+
+        if (length > 0 && line[length - 1] == '\n')
+        {
+            line[length - 1] = '\0';
+        }
+
+        if (UserNameIsGlobal() && strncmp(line, "global_username", 15) == 0)
+        {
+            char *start = strchr(line, ':');
+            if (start != NULL)
+            {
+                start++; // Move past the ':'
+                while (*start == ' ' || *start == '\t')
+                {
+                    start++; // Skip spaces or tabs
+                }
+                author = strdup(start);
+                break;
+            }
+        }
+        else if (!UserNameIsGlobal() && strncmp(line, "username:", 9) == 0)
+        {
+            char *start = strchr(line, ':');
+            if (start != NULL)
+            {
+                start++; // Move past the ':'
+                while (*start == ' ' || *start == '\t')
+                {
+                    start++; // Skip spaces or tabs
+                }
+                author = strdup(start);
+                break;
+            }
+        }
+    }
+
+    fclose(configFile);
+    return author;
+}
+
+// config & init
 int config(char *username, char *email, int isGlobal)
 {
-    FILE *file = fopen(GCONFIG_FILE, "r+");
+    FILE *file = fopen(GCONFIG_FILE, "r");
+    FILE *tempFile = fopen(TMP_FILE, "w");
 
-    if (file == NULL)
+    if (file == NULL || tempFile == NULL)
     {
         perror("Error opening config file");
         return 1;
@@ -298,39 +470,68 @@ int config(char *username, char *email, int isGlobal)
     char prefix[20];
     int found = 0;
 
+    sprintf(prefix, "global_%s", strcmp(username, "") == 0 ? "email" : "username");
+
+    while (fgets(line, sizeof(line), file))
+    {
+        if (strstr(line, prefix) != NULL)
+        {
+            found = 1;
+            break;
+        }
+    }
+
+
+    fseek(file, 0, SEEK_SET);
+
     if (isGlobal)
     {
-        sprintf(prefix, "global_%s", strcmp(username, "") == 0 ? "email" : "username");
-
         while (fgets(line, sizeof(line), file))
         {
             if (strstr(line, prefix) != NULL)
             {
                 sprintf(newLine, "%s : %s\n", prefix, strcmp(username, "") == 0 ? email : username);
-                fseek(file, -strlen(line), SEEK_CUR);
-                fprintf(file, "%s", newLine);
+                fprintf(tempFile, "%s", newLine);
                 found = 1;
-                break;
+            }
+            else
+            {
+                fprintf(tempFile, "%s", line);
             }
         }
 
         if (!found)
         {
-            fprintf(file, "%s : %s\n", prefix, strcmp(username, "") == 0 ? email : username);
+            fprintf(tempFile, "%s : %s\n", prefix, strcmp(username, "") == 0 ? email : username);
         }
     }
 
     fclose(file);
-    if (strcmp(username, "") == 0)
+    fclose(tempFile);
+
+
+    if (rename(TMP_FILE, GCONFIG_FILE) != 0)
     {
-        printf("Global email is set! \n");
-        EmailIsGlobal = 1;
+        perror("Error replacing config file");
+        return 1;
+    }
+
+    if (found)
+    {
+        printf("Global %s is updated!\n", strcmp(username, "") == 0 ? "email" : "username");
+    }
+    else if (strcmp(username, "") == 0)
+    {
+        printf("Global email is set!\n");
     }
     else
     {
-        printf("Global username is set! \n");
-        UserNameIsGlobal = 1;
+        printf("Global username is set!\n");
+        FILE * file = fopen(".neogit/isglobal", "w");
+        fprintf(file, "1");
+        fclose(file);
     }
+
     return 0;
 }
 int create_configs(char *username, char *email)
@@ -355,6 +556,9 @@ int create_configs(char *username, char *email)
     if (mkdir(".neogit/branches", 0755) != 0)
         return 1;
 
+    if (mkdir(".neogit/tags", 0755) != 0)
+        return 1;
+
     file = fopen(".neogit/staging", "w");
     fclose(file);
 
@@ -369,6 +573,13 @@ int create_configs(char *username, char *email)
 
     file = fopen(".neogit/alias", "w");
     fclose(file);
+
+    file = fopen(".neogit/gconfig", "w");
+    fclose(file);
+
+    file = fopen(".neogit/isglobal", "w");
+    fclose(file);
+
 
     return 0;
 }
@@ -1238,6 +1449,36 @@ bool is_tracked(char *filepath)
 }
 int create_commit_file(int commit_ID, char *message)
 {
+    char author[50];
+    char line[MAX_LINE_LENGTH];
+    FILE *configFile;
+    if (UserNameIsGlobal())
+    {
+        configFile = fopen("/Users/alinr/Desktop/config.txt", "r");
+    }
+    else if (!UserNameIsGlobal())
+    {
+        configFile = fopen(".neogit/config", "r");
+    }
+    while (fgets(line, sizeof(line), configFile) != NULL)
+    {
+        int length = strlen(line);
+
+        if (length > 0 && line[length - 1] == '\n')
+        {
+            line[length - 1] = '\0';
+        }
+
+        if ((UserNameIsGlobal() && strncmp(line, "global_username", 15) == 0) ||
+            (!UserNameIsGlobal() && strncmp(line, "username:", 9) == 0))
+        {
+            sscanf(line, "%*[^:]: %[^\n]", author);
+            break;
+        }
+    }
+
+    fclose(configFile);
+
     char commit_filepath[MAX_FILENAME_LENGTH];
     strcpy(commit_filepath, ".neogit/commits/");
     char tmp[10];
@@ -1260,6 +1501,7 @@ int create_commit_file(int commit_ID, char *message)
     fprintf(file, "datetime: %s\n", datetime_str);
     fprintf(file, "message: %s\n", message);
     fprintf(file, "branch: %s\n", CurrentBranch);
+    fprintf(file, "author: %s\n", author);
     fprintf(file, "files:\n");
 
     DIR *dir = opendir(".");
@@ -1390,7 +1632,8 @@ int showlog()
                 sscanf(line, "datetime: %s %s", dateOfCommit, hour);
                 printf("Date and Time of commit: %s %s\n", dateOfCommit, hour);
             }
-            else if (strncmp(line, "branch:", 7) == 0){
+            else if (strncmp(line, "branch:", 7) == 0)
+            {
                 sscanf(line, "branch: %s", branch);
                 printf("branch : %s\n", branch);
             }
@@ -1399,7 +1642,11 @@ int showlog()
                 sscanf(line, "message: %[^\n]", message);
                 printf("Commit message: %s\n", message);
             }
-            // else if (strncmp(line, "branch"))
+            else if (strncmp(line, "author:", 7) == 0)
+            {
+                sscanf(line, "author: %s", personThatCommitted);
+                printf("author : %s\n", personThatCommitted);
+            }
             else if (strncmp(line, "files:", 6) == 0)
             {
                 while (fgets(line, sizeof(line), file) != NULL)
@@ -1414,42 +1661,6 @@ int showlog()
             }
         }
 
-        FILE *configFile;
-        if (UserNameIsGlobal)
-        {
-            configFile = fopen("/Users/alinr/Desktop/config.txt", "r");
-        }
-        else
-        {
-            configFile = fopen(".neogit/config", "r");
-        }
-
-        if (configFile == NULL)
-        {
-            fprintf(stderr, "Error opening config file\n");
-            return 1;
-        }
-
-        while (fgets(line, sizeof(line), configFile) != NULL)
-        {
-            int length = strlen(line);
-
-            if (length > 0 && line[length - 1] == '\n')
-            {
-                line[length - 1] = '\0';
-            }
-
-            if ((UserNameIsGlobal && strncmp(line, "global_username", 15) == 0) ||
-                (!UserNameIsGlobal && strncmp(line, "username:", 9) == 0))
-            {
-                sscanf(line, "%*[^:]: %[^\n]", personThatCommitted);
-                break;
-            }
-        }
-
-        fclose(configFile);
-
-        printf("Author of commit: %s\n", personThatCommitted);
         printf("Commit ID: %d\n", i);
         printf("\n");
         fclose(file);
@@ -1527,7 +1738,7 @@ int showlogn(int n)
         }
 
         FILE *configFile;
-        if (UserNameIsGlobal)
+        if (UserNameIsGlobal())
         {
             configFile = fopen("/Users/alinr/Desktop/config.txt", "r");
         }
@@ -1551,8 +1762,8 @@ int showlogn(int n)
                 line[length - 1] = '\0';
             }
 
-            if ((UserNameIsGlobal && strncmp(line, "global_username", 15) == 0) ||
-                (!UserNameIsGlobal && strncmp(line, "username:", 9) == 0))
+            if ((UserNameIsGlobal() && strncmp(line, "global_username", 15) == 0) ||
+                (!UserNameIsGlobal() && strncmp(line, "username:", 9) == 0))
             {
                 sscanf(line, "%*[^:]: %[^\n]", personThatCommitted);
                 break;
@@ -1565,6 +1776,477 @@ int showlogn(int n)
         printf("Commit ID: %d\n", i);
         printf("\n");
         fclose(file);
+    }
+
+    return 0;
+}
+int showlogBranch(char *branchname)
+{
+    int commitnumb = findHighestFileNumber();
+
+    if (!commitnumb)
+    {
+        printf("No commits found!\n");
+        return 1;
+    }
+    for (int i = commitnumb; i >= 1; i--)
+    {
+        printf("\n");
+        char dateOfCommit[200];
+        char hour[200];
+        char message[200];
+        char personThatCommitted[200];
+        char CommitId[200];
+        char branch[200];
+        int numbOfCommittedFiles = 0;
+
+        FILE *files;
+        char dests[200];
+        snprintf(dests, sizeof(dests), ".neogit/commits/%d", i);
+
+        files = fopen(dests, "r");
+
+        if (files == NULL)
+        {
+            fprintf(stderr, "Error opening file: %s\n", dests);
+            return 1;
+        }
+
+        char linec[MAX_LINE_LENGTH];
+
+        while (fgets(linec, sizeof(linec), files) != NULL)
+        {
+            int length = strlen(linec);
+
+            if (length > 0 && linec[length - 1] == '\n')
+            {
+                linec[length - 1] = '\0';
+            }
+
+            if (strncmp(linec, "branch:", 7) == 0)
+            {
+                sscanf(linec, "branch: %s", branch);
+            }
+        }
+
+        if (strcmp(branch, branchname) != 0)
+        {
+            continue;
+        }
+
+        FILE *file;
+        char dest[200];
+        snprintf(dest, sizeof(dest), ".neogit/commits/%d", i);
+
+        file = fopen(dest, "r");
+
+        if (file == NULL)
+        {
+            fprintf(stderr, "Error opening file: %s\n", dest);
+            return 1;
+        }
+
+        char line[MAX_LINE_LENGTH];
+
+        while (fgets(line, sizeof(line), file) != NULL)
+        {
+            int length = strlen(line);
+
+            if (length > 0 && line[length - 1] == '\n')
+            {
+                line[length - 1] = '\0';
+            }
+
+            if (strncmp(line, "datetime:", 9) == 0)
+            {
+                sscanf(line, "datetime: %s %s", dateOfCommit, hour);
+                printf("Date and Time of commit: %s %s\n", dateOfCommit, hour);
+            }
+            else if (strncmp(line, "message:", 8) == 0)
+            {
+                sscanf(line, "message: %[^\n]", message);
+                printf("Commit message: %s\n", message);
+                printf("branch : %s\n", branch);
+            }
+
+            else if (strncmp(line, "files:", 6) == 0)
+            {
+                while (fgets(line, sizeof(line), file) != NULL)
+                {
+                    if (line[0] == '\n' || line[0] == '\0')
+                    {
+                        break;
+                    }
+                    numbOfCommittedFiles++;
+                }
+                printf("Number of files in this commit: %d\n", numbOfCommittedFiles);
+            }
+        }
+
+        FILE *configFile;
+        if (UserNameIsGlobal())
+        {
+            configFile = fopen("/Users/alinr/Desktop/config.txt", "r");
+        }
+        else
+        {
+            configFile = fopen(".neogit/config", "r");
+        }
+
+        if (configFile == NULL)
+        {
+            fprintf(stderr, "Error opening config file\n");
+            return 1;
+        }
+
+        while (fgets(line, sizeof(line), configFile) != NULL)
+        {
+            int length = strlen(line);
+
+            if (length > 0 && line[length - 1] == '\n')
+            {
+                line[length - 1] = '\0';
+            }
+
+            if ((UserNameIsGlobal() && strncmp(line, "global_username", 15) == 0) ||
+                (!UserNameIsGlobal() && strncmp(line, "username:", 9) == 0))
+            {
+                sscanf(line, "%*[^:]: %[^\n]", personThatCommitted);
+                break;
+            }
+        }
+
+        fclose(configFile);
+
+        printf("Author of commit: %s\n", personThatCommitted);
+        printf("Commit ID: %d\n", i);
+        printf("\n");
+        fclose(file);
+    }
+
+    return 0;
+}
+int showlogAuthor(char *author)
+{
+    int commitnumb = findHighestFileNumber();
+
+    if (!commitnumb)
+    {
+        printf("No commits found!\n");
+        return 1;
+    }
+    for (int i = commitnumb; i >= 1; i--)
+    {
+        printf("\n");
+        char dateOfCommit[200];
+        char hour[200];
+        char message[200];
+        char personThatCommitted[200];
+        char CommitId[200];
+        char branch[200];
+        int numbOfCommittedFiles = 0;
+
+        FILE *files;
+        char dests[200];
+        snprintf(dests, sizeof(dests), ".neogit/commits/%d", i);
+
+        files = fopen(dests, "r");
+
+        if (files == NULL)
+        {
+            fprintf(stderr, "Error opening file: %s\n", dests);
+            return 1;
+        }
+
+        char linec[MAX_LINE_LENGTH];
+
+        while (fgets(linec, sizeof(linec), files) != NULL)
+        {
+            int length = strlen(linec);
+
+            if (length > 0 && linec[length - 1] == '\n')
+            {
+                linec[length - 1] = '\0';
+            }
+
+            if (strncmp(linec, "author:", 7) == 0)
+            {
+                sscanf(linec, "author: %s", personThatCommitted);
+            }
+        }
+
+        if (strcmp(author, personThatCommitted) != 0)
+        {
+            continue;
+        }
+
+        FILE *file;
+        char dest[200];
+        snprintf(dest, sizeof(dest), ".neogit/commits/%d", i);
+
+        file = fopen(dest, "r");
+
+        if (file == NULL)
+        {
+            fprintf(stderr, "Error opening file: %s\n", dest);
+            return 1;
+        }
+
+        char line[MAX_LINE_LENGTH];
+
+        while (fgets(line, sizeof(line), file) != NULL)
+        {
+            int length = strlen(line);
+
+            if (length > 0 && line[length - 1] == '\n')
+            {
+                line[length - 1] = '\0';
+            }
+
+            if (strncmp(line, "datetime:", 9) == 0)
+            {
+                sscanf(line, "datetime: %s %s", dateOfCommit, hour);
+                printf("Date and Time of commit: %s %s\n", dateOfCommit, hour);
+            }
+            else if (strncmp(line, "message:", 8) == 0)
+            {
+                sscanf(line, "message: %[^\n]", message);
+                printf("Commit message: %s\n", message);
+            }
+
+            else if (strncmp(line, "files:", 6) == 0)
+            {
+                while (fgets(line, sizeof(line), file) != NULL)
+                {
+                    if (line[0] == '\n' || line[0] == '\0')
+                    {
+                        break;
+                    }
+                    numbOfCommittedFiles++;
+                }
+                printf("Number of files in this commit: %d\n", numbOfCommittedFiles);
+            }
+        }
+
+        FILE *configFile;
+        if (UserNameIsGlobal())
+        {
+            configFile = fopen("/Users/alinr/Desktop/config.txt", "r");
+        }
+        else
+        {
+            configFile = fopen(".neogit/config", "r");
+        }
+
+        if (configFile == NULL)
+        {
+            fprintf(stderr, "Error opening config file\n");
+            return 1;
+        }
+
+        while (fgets(line, sizeof(line), configFile) != NULL)
+        {
+            int length = strlen(line);
+
+            if (length > 0 && line[length - 1] == '\n')
+            {
+                line[length - 1] = '\0';
+            }
+
+            if ((UserNameIsGlobal() && strncmp(line, "global_username", 15) == 0) ||
+                (!UserNameIsGlobal() && strncmp(line, "username:", 9) == 0))
+            {
+                sscanf(line, "%*[^:]: %[^\n]", personThatCommitted);
+                break;
+            }
+        }
+
+        fclose(configFile);
+
+        printf("Author of commit: %s\n", personThatCommitted);
+        printf("Commit ID: %d\n", i);
+        printf("\n");
+        fclose(file);
+    }
+
+    return 0;
+}
+int logBefore(char *targetDate)
+{
+    int commitnumb = findHighestFileNumber();
+
+    if (!commitnumb)
+    {
+        printf("No commits found!\n");
+        return 1;
+    }
+
+    struct tm targetTime;
+    if (strptime(targetDate, "%Y-%m-%d", &targetTime) == NULL)
+    {
+        fprintf(stderr, "Invalid date format. Use YYYY-MM-DD.\n");
+        return 1;
+    }
+
+    for (int i = commitnumb; i >= 1; i--)
+    {
+        printf("\n");
+        char dateOfCommit[200];
+        char hour[200];
+        char personThatCommitted[200];
+        char branch[200];
+        char message[200];
+        int numbOfCommittedFiles = 0;
+
+        FILE *file;
+        char dest[200];
+        snprintf(dest, sizeof(dest), ".neogit/commits/%d", i);
+
+        file = fopen(dest, "r");
+
+        if (file == NULL)
+        {
+            fprintf(stderr, "Error opening file: %s\n", dest);
+            return 1;
+        }
+
+        char line[MAX_LINE_LENGTH];
+        struct tm commitTime = {0}; 
+
+        while (fgets(line, sizeof(line), file) != NULL)
+        {
+            if (strncmp(line, "datetime:", 9) == 0)
+            {
+                sscanf(line, "datetime: %s %s", dateOfCommit, hour);
+                strptime(dateOfCommit, "%Y-%m-%d", &commitTime);
+            }
+            else if (strncmp(line, "branch:", 7) == 0)
+            {
+                sscanf(line, "branch: %s", branch);
+            }
+            else if (strncmp(line, "message:", 8) == 0)
+            {
+                sscanf(line, "message: %[^\n]", message);
+            }
+            else if (strncmp(line, "author:", 7) == 0)
+            {
+                sscanf(line, "author: %s", personThatCommitted);
+            }
+            else if (strncmp(line, "files:", 6) == 0)
+            {
+                while (fgets(line, sizeof(line), file) != NULL)
+                {
+                    if (line[0] == '\n' || line[0] == '\0')
+                    {
+                        break;
+                    }
+                    numbOfCommittedFiles++;
+                }
+            }
+        }
+
+        fclose(file);
+
+        if (mktime(&commitTime) < mktime(&targetTime))
+        {
+            printf("Commit ID: %d\n", i);
+            printf("Branch: %s\n", branch);
+            printf("Author: %s\n", personThatCommitted);
+            printf("Commit message: %s\n", message);
+            printf("Number of files in this commit: %d\n", numbOfCommittedFiles);
+            printf("Date and Time: %s %s\n", dateOfCommit, hour);
+        }
+        printf("\n");
+    }
+
+    return 0;
+}
+int logSince(char *targetDate)
+{
+    int commitnumb = findHighestFileNumber();
+
+    if (!commitnumb)
+    {
+        printf("No commits found!\n");
+        return 1;
+    }
+
+    struct tm targetTime;
+    if (strptime(targetDate, "%Y-%m-%d", &targetTime) == NULL)
+    {
+        fprintf(stderr, "Invalid date format. Use YYYY-MM-DD.\n");
+        return 1;
+    }
+
+    for (int i = commitnumb; i >= 1; i--)
+    {
+        printf("\n");
+        char dateOfCommit[200];
+        char hour[200];
+        char personThatCommitted[200];
+        char branch[200];
+        char message[200];
+        int numbOfCommittedFiles = 0;
+
+        FILE *file;
+        char dest[200];
+        snprintf(dest, sizeof(dest), ".neogit/commits/%d", i);
+
+        file = fopen(dest, "r");
+
+        if (file == NULL)
+        {
+            fprintf(stderr, "Error opening file: %s\n", dest);
+            return 1;
+        }
+
+        char line[MAX_LINE_LENGTH];
+        struct tm commitTime = {0}; 
+
+        while (fgets(line, sizeof(line), file) != NULL)
+        {
+            if (strncmp(line, "datetime:", 9) == 0)
+            {
+                sscanf(line, "datetime: %s %s", dateOfCommit, hour);
+                strptime(dateOfCommit, "%Y-%m-%d", &commitTime);
+            }
+            else if (strncmp(line, "branch:", 7) == 0)
+            {
+                sscanf(line, "branch: %s", branch);
+            }
+            else if (strncmp(line, "message:", 8) == 0)
+            {
+                sscanf(line, "message: %[^\n]", message);
+            }
+            else if (strncmp(line, "author:", 7) == 0)
+            {
+                sscanf(line, "author: %s", personThatCommitted);
+            }
+            else if (strncmp(line, "files:", 6) == 0)
+            {
+                while (fgets(line, sizeof(line), file) != NULL)
+                {
+                    if (line[0] == '\n' || line[0] == '\0')
+                    {
+                        break;
+                    }
+                    numbOfCommittedFiles++;
+                }
+            }
+        }
+
+        fclose(file);
+
+        if (mktime(&commitTime) >= mktime(&targetTime))
+        {
+            printf("Commit ID: %d\n", i);
+            printf("Branch: %s\n", branch);
+            printf("Author: %s\n", personThatCommitted);
+            printf("Commit message: %s\n", message);
+            printf("Number of files in this commit: %d\n", numbOfCommittedFiles);
+            printf("Date and Time: %s %s\n", dateOfCommit, hour);
+        }
+        printf("\n");
     }
 
     return 0;
@@ -1909,5 +2591,145 @@ int remove_shortcut(const char *shortcut_name)
     rename(".neogit/temp_shortcuts", shortcuts_file_path);
 
     printf("Shortcut removed successfully: %s\n", shortcut_name);
+    return 0;
+}
+
+// revert 
+
+
+
+// diff
+
+int compareLines(const char *line1, const char *line2) {
+    while (*line1 != '\0' && *line2 != '\0') {
+        if (*line1 == ' ' || *line1 == '\t' || *line1 == '\n') {
+            line1++;
+            continue;
+        }
+        if (*line2 == ' ' || *line2 == '\t' || *line2 == '\n') {
+            line2++;
+            continue;
+        }
+
+        if (*line1 != *line2) {
+            return 0; 
+        }
+
+        line1++;
+        line2++;
+    }
+
+    return (*line1 == '\0' && *line2 == '\0');
+}
+int neogit_diff(const char *file1, const char *file2, int line1_start, int line1_end, int line2_start, int line2_end) {
+    FILE *fp1, *fp2;
+    char buffer1[512], buffer2[512];
+
+    if ((fp1 = fopen(file1, "r")) == NULL) {
+        fprintf(stderr, "Error opening file: %s\n", file1);
+        return 1;
+    }
+
+    if ((fp2 = fopen(file2, "r")) == NULL) {
+        fprintf(stderr, "Error opening file: %s\n", file2);
+        fclose(fp1);
+        return 1;
+    }
+
+    // Move to the specified line numbers
+    for (int i = 1; i < line1_start; ++i)
+        if (fgets(buffer1, sizeof(buffer1), fp1) == NULL) break;
+
+    for (int i = 1; i < line2_start; ++i)
+        if (fgets(buffer2, sizeof(buffer2), fp2) == NULL) break;
+
+    int lineNumber1 = line1_start;
+    int lineNumber2 = line2_start;
+
+    int foundDifference = 0;
+
+    while (!feof(fp1) || !feof(fp2)) {
+     
+        if (feof(fp1) && feof(fp2)) {
+        break; // Both files have reached the end
+        }
+        if (fgets(buffer1, sizeof(buffer1), fp1) != NULL) {
+            lineNumber1++;
+        }
+
+        if (fgets(buffer2, sizeof(buffer2), fp2) != NULL) {
+            lineNumber2++;
+        }
+
+        if ((line1_end > 0 && lineNumber1 > line1_end) || (line2_end > 0 && lineNumber2 > line2_end)) {
+            break;
+        }
+
+        if (strcmp(buffer1, buffer2) != 0) {
+            if (!foundDifference) {
+                printf("«««««\n");
+                foundDifference = 1;
+            }
+            printf("«««««\n");
+            printf("%s - %d \n", file1, lineNumber1);
+            printf(RED "%s" RESET, buffer1);
+            printf("%s - %d \n", file2, lineNumber2);
+            printf(YELLOW "%s" RESET, buffer2);
+            printf("»»»»»\n");
+            printf("\n");
+        }
+    }
+
+    fclose(fp1);
+    fclose(fp2);
+
+    return 0; 
+}
+
+// tag
+
+int create_tag(const char *tag_name, const char *message, int cgiven ,int commitid, int force){
+    char tag_path[MAX_FILENAME_LENGTH];
+    char * author = extractUsername();
+    int commit_id;
+    if (cgiven){commit_id = commitid;}
+    else {commit_id = findHighestFileNumber();}
+
+    snprintf(tag_path, sizeof(tag_path), ".neogit/tags/%s", tag_name);
+
+    if (!force && access(tag_path, F_OK) == 0) {
+        fprintf(stderr, "Error: Tag '%s' already exists. Use -f to force.\n", tag_name);
+        return 1;
+    }
+
+    FILE *tag_file;
+
+    if ((tag_file = fopen(tag_path, "w")) == NULL) {
+        fprintf(stderr, "Error creating tag file: %s\n", tag_path);
+        return 1;
+    }
+
+    time_t t;
+    struct tm *tm_info;
+
+    time(&t);
+    tm_info = localtime(&t);
+
+    char time_str[20];
+    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm_info);
+
+    fprintf(tag_file, "Tag Name: %s\n", tag_name);
+    fprintf(tag_file, "Commit ID: %d\n", commit_id);
+    fprintf(tag_file, "Tagger: %s\n", author);
+    fprintf(tag_file, "Date and Time: %s\n", time_str);
+
+    if (message != NULL) {
+        fprintf(tag_file, "Message: %s\n", message);
+    }
+
+    fclose(tag_file);
+
+    printf("Tag '%s' created successfully.\n", tag_name);
+
     return 0;
 }
