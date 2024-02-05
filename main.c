@@ -27,6 +27,7 @@
 char *master = "master";
 
 // FUNCTION DECLARATIONS
+int findHighestFileNumberbranch(const char *branchname);
 int configLocal();
 char *get_current_branch();
 int config(char *username, char *email, int isGlobal);
@@ -74,6 +75,8 @@ int showlogBranch(char *branchname);
 int showlogAuthor(char *author);
 int logBefore(char *time);
 int logSince(char *targetDate);
+int logsearch(char *word);
+
 //
 
 int branch(char *path);
@@ -121,7 +124,6 @@ int showTagContent(const char *tagName);
 
 int neogit_grep(const char *file, const char *word, const char *commitId, int printLineNumber);
 //////////////////////////MAIN FUNCTION////////////////////////////
-
 
 int UserNameIsGlobal()
 {
@@ -177,7 +179,7 @@ bool is_neogit_initialized()
 
     if (getcwd(cwd, sizeof(cwd)) == NULL)
     {
-        perror(RED"Error getting current working directory"RESET);
+        perror(RED "Error getting current working directory" RESET);
         return false;
     }
 
@@ -220,7 +222,7 @@ char *extractUsername()
 
     if (configFile == NULL)
     {
-        perror(RED"Error opening config file"RESET);
+        perror(RED "Error opening config file" RESET);
         return NULL;
     }
 
@@ -266,14 +268,48 @@ char *extractUsername()
     fclose(configFile);
     return author;
 }
-int configLocal() 
+int configLocal()
 {
-    FILE * file = fopen(".neogit/isglobal", "w");
+    FILE *file = fopen(".neogit/isglobal", "w");
     fprintf(file, "0");
     fclose(file);
-    printf(GREEN"User is set to local!\n"RESET);
+    printf(GREEN "User is set to local!\n" RESET);
     return 0;
 }
+int findHighestFileNumberbranch(const char *branchname)
+{
+    char branchPath[200];
+    snprintf(branchPath, sizeof(branchPath), ".neogit/branches/%s", branchname);
+
+    DIR *dir = opendir(branchPath);
+
+    if (dir == NULL)
+    {
+        fprintf(stderr, "Error opening branch directory: %s\n", branchPath);
+        return -1;
+    }
+
+    int highestNumber = -1;
+
+    struct dirent *ent;
+    while ((ent = readdir(dir)) != NULL)
+    {
+        if (strcmp(ent->d_name, ".") != 0 && strcmp(ent->d_name, "..") != 0)
+        {
+            int commitID = atoi(ent->d_name);
+
+            if (commitID > highestNumber)
+            {
+                highestNumber = commitID;
+            }
+        }
+    }
+
+    closedir(dir);
+
+    return highestNumber;
+}
+
 ///////////////////////////////////////////////////////////////
 
 int main(int argc, char *argv[])
@@ -399,6 +435,10 @@ int main(int argc, char *argv[])
         {
             return logSince(argv[3]);
         }
+        else if (argc >= 4 && strcmp(argv[2], "-search") == 0)
+        {
+            return logsearch(argv[3]);
+        }
         return showlog();
     }
     else if (strcmp(argv[1], "branch") == 0)
@@ -420,7 +460,7 @@ int main(int argc, char *argv[])
             const char *shortcut_message = argv[3];
             const char *shortcut_name = argv[5];
             add_shortcut(shortcut_name, shortcut_message);
-            printf(GREEN"Shortcut set successfully: "RESET"%s -> %s\n", shortcut_name, shortcut_message);
+            printf(GREEN "Shortcut set successfully: " RESET "%s -> %s\n", shortcut_name, shortcut_message);
             return 0;
         }
         else
@@ -540,7 +580,7 @@ int config(char *username, char *email, int isGlobal)
 
     if (file == NULL || tempFile == NULL)
     {
-        perror(RED"Error opening config file"RESET);
+        perror(RED "Error opening config file" RESET);
         return 1;
     }
 
@@ -589,21 +629,21 @@ int config(char *username, char *email, int isGlobal)
 
     if (rename(TMP_FILE, GCONFIG_FILE) != 0)
     {
-        perror(RED"Error replacing config file"RESET);
+        perror(RED "Error replacing config file" RESET);
         return 1;
     }
 
     if (found)
     {
-        printf(GREEN"Global %s is updated!\n", strcmp(username, "") == 0 ? "email" : "username"RESET);
+        printf(GREEN "Global %s is updated!\n", strcmp(username, "") == 0 ? "email" : "username" RESET);
     }
     else if (strcmp(username, "") == 0)
     {
-        printf(GREEN"Global email is set!\n"RESET);
+        printf(GREEN "Global email is set!\n" RESET);
     }
     else
     {
-        printf(GREEN"Global username is set!\n"RESET);
+        printf(GREEN "Global username is set!\n" RESET);
         FILE *file = fopen(".neogit/isglobal", "w");
         fprintf(file, "1");
         fclose(file);
@@ -658,7 +698,6 @@ int create_configs(char *username, char *email)
     fprintf(file, "0");
     fclose(file);
 
-
     file = fopen(".neogit/currbranch", "w");
     fprintf(file, "master");
     fclose(file);
@@ -700,7 +739,7 @@ int run_init(int argc, char *const argv[])
         DIR *dir = opendir(".");
         if (dir == NULL)
         {
-            perror(RED"We had an error trying to open the current directory. Please try again !\n"RESET);
+            perror(RED "We had an error trying to open the current directory. Please try again !\n" RESET);
             return 1;
         }
         while ((entry = readdir(dir)) != NULL)
@@ -740,16 +779,16 @@ int run_init(int argc, char *const argv[])
 
         if (get_user_config(username, email, isGlobal) != 0)
         {
-            perror(RED"Error getting user configuration"RESET);
+            perror(RED "Error getting user configuration" RESET);
             return 1;
         }
-        printf(GREEN"Neogit initialized successfully!\n"RESET);
+        printf(GREEN "Neogit initialized successfully!\n" RESET);
 
         return create_configs(username, email);
     }
     else
     {
-        printf(RED"Neogit repository has already been initialized"RESET);
+        printf(RED "Neogit repository has already been initialized" RESET);
     }
     return 0;
 }
@@ -760,7 +799,7 @@ int run_add(int argc, char *const argv[])
 {
     if (argc < 3)
     {
-        perror(RED"Please specify at least one file or directory"RESET);
+        perror(RED "Please specify at least one file or directory" RESET);
         return 1;
     }
 
@@ -771,7 +810,7 @@ int run_add(int argc, char *const argv[])
     }
     if (argc > 3 && strcmp(argv[2], "-f") != 0)
     {
-        printf(RED"You need to use neogit add -f in order to add multiple files!\n"RESET);
+        printf(RED "You need to use neogit add -f in order to add multiple files!\n" RESET);
         return 0;
     }
 
@@ -784,7 +823,7 @@ int run_add(int argc, char *const argv[])
             {
                 if (add_to_staging(glob_result.gl_pathv[j]) != 0 && !forceFlag)
                 {
-                    fprintf(stderr, RED"%s doesn't exist! \n"RESET, glob_result.gl_pathv[j]);
+                    fprintf(stderr, RED "%s doesn't exist! \n" RESET, glob_result.gl_pathv[j]);
                 }
             }
             globfree(&glob_result);
@@ -793,7 +832,7 @@ int run_add(int argc, char *const argv[])
         {
             if (!forceFlag)
             {
-                fprintf(stderr, RED"Error expanding wildcard pattern for %s\n"RESET, argv[i]);
+                fprintf(stderr, RED "Error expanding wildcard pattern for %s\n" RESET, argv[i]);
             }
         }
     }
@@ -870,7 +909,7 @@ int add_to_staging(char *path)
         fclose(destination);
 
         fprintf(file, "%s\n", path);
-        printf(GREEN"%s added to staging area!\n"RESET, path);
+        printf(GREEN "%s added to staging area!\n" RESET, path);
         fclose(file);
         // add to allAdds
         file = fopen(".neogit/allAdds", "a");
@@ -895,7 +934,7 @@ int add_directory_contents(char *dir_path)
     DIR *dir = opendir(dir_path);
     if (dir == NULL)
     {
-        perror(RED"Error opening directory"RESET);
+        perror(RED "Error opening directory" RESET);
         return 1;
     }
 
@@ -927,7 +966,7 @@ int compareFiles(const char *file1Path, const char *file2Path)
 
     if (file1 == NULL || file2 == NULL)
     {
-        perror(RED"Error opening files"RESET);
+        perror(RED "Error opening files" RESET);
         return -1;
     }
 
@@ -951,7 +990,7 @@ int compareFiles(const char *file1Path, const char *file2Path)
 
     if (buffer1 == NULL || buffer2 == NULL)
     {
-        perror(RED"Error allocating memory"RESET);
+        perror(RED "Error allocating memory" RESET);
         fclose(file1);
         fclose(file2);
         return -1;
@@ -977,16 +1016,14 @@ int run_reset(int argc, char *const argv[])
 {
     if (argc < 3)
     {
-        perror(RED"Please specify at least one file or directory"RESET);
+        perror(RED "Please specify at least one file or directory" RESET);
         return 1;
     }
-
     int forceFlag = 0;
     if (argc > 3 && strcmp(argv[2], "-f") == 0)
     {
         forceFlag = 1;
     }
-
     for (int i = forceFlag ? 3 : 2; i < argc; ++i)
     {
         glob_t glob_result;
@@ -996,7 +1033,7 @@ int run_reset(int argc, char *const argv[])
             {
                 if (reset_file(glob_result.gl_pathv[j]) != 0 && !forceFlag)
                 {
-                    fprintf(stderr, RED"%s doesn't exist in the staging area!\n"RESET, glob_result.gl_pathv[j]);
+                    fprintf(stderr, RED "%s doesn't exist in the staging area!\n" RESET, glob_result.gl_pathv[j]);
                 }
             }
             globfree(&glob_result);
@@ -1005,7 +1042,7 @@ int run_reset(int argc, char *const argv[])
         {
             if (!forceFlag)
             {
-                fprintf(stderr, RED"Error expanding wildcard pattern for %s\n"RESET, argv[i]);
+                fprintf(stderr, RED "Error expanding wildcard pattern for %s\n" RESET, argv[i]);
             }
         }
     }
@@ -1068,7 +1105,7 @@ int reset_file(char *filepath)
         // If the file was not found in the staging area, clean up and return an error
         remove(".neogit/tmp_staging");
         fclose(allAddsFile);
-        fprintf(stderr, RED"%s is not in the staging area!\n"RESET, filepath);
+        fprintf(stderr, RED "%s is not in the staging area!\n" RESET, filepath);
         return 1;
     }
 
@@ -1080,7 +1117,7 @@ int reset_file(char *filepath)
     if (newAllAddsFile == NULL)
     {
         fclose(allAddsFile);
-        fprintf(stderr, RED"Error opening tmp_allAdds file for writing.\n"RESET);
+        fprintf(stderr, RED "Error opening tmp_allAdds file for writing.\n" RESET);
         return 1;
     }
 
@@ -1116,14 +1153,14 @@ int reset_file(char *filepath)
     if (!found)
     {
         remove(".neogit/tmp_allAdds");
-        fprintf(stderr, RED"%s is not in the allAdds file!\n"RESET, filepath);
+        fprintf(stderr, RED "%s is not in the allAdds file!\n" RESET, filepath);
         return 1;
     }
 
     remove(".neogit/allAdds");
     rename(".neogit/tmp_allAdds", ".neogit/allAdds");
 
-    printf(GREEN"%s removed from the staging area.\n"RESET, filepath);
+    printf(GREEN "%s removed from the staging area.\n" RESET, filepath);
     return 0;
 }
 int undo_last_add()
@@ -1131,7 +1168,7 @@ int undo_last_add()
     FILE *allAddsFile = fopen(".neogit/allAdds", "r");
     if (allAddsFile == NULL)
     {
-        fprintf(stderr, RED"Error opening allAdds file for reading.\n"RESET);
+        fprintf(stderr, RED "Error opening allAdds file for reading.\n" RESET);
         return 1;
     }
 
@@ -1160,7 +1197,7 @@ int undo_last_add()
 
     if (lastAddedFile[0] == '\0')
     {
-        fprintf(stderr, RED"No files to undo in the allAdds file.\n"RESET);
+        fprintf(stderr, RED "No files to undo in the allAdds file.\n" RESET);
         return 1;
     }
 
@@ -1168,12 +1205,12 @@ int undo_last_add()
     sprintf(paath, ".neogit/StagingAreaFiles/%s", lastAddedFile);
     remove(paath);
 
-    printf(GREEN"Undo: Removing %s from the staging area.\n"RESET, lastAddedFile);
+    printf(GREEN "Undo: Removing %s from the staging area.\n" RESET, lastAddedFile);
 
     FILE *newAllAddsFile = fopen(".neogit/tmp_allAdds", "w");
     if (newAllAddsFile == NULL)
     {
-        fprintf(stderr, RED"Error opening tmp_allAdds file for writing.\n"RESET);
+        fprintf(stderr, RED "Error opening tmp_allAdds file for writing.\n" RESET);
         return 1;
     }
 
@@ -1181,7 +1218,7 @@ int undo_last_add()
     if (allAddsFile == NULL)
     {
         fclose(newAllAddsFile);
-        fprintf(stderr, RED"Error opening allAdds file for reading.\n"RESET);
+        fprintf(stderr, RED "Error opening allAdds file for reading.\n" RESET);
         return 1;
     }
 
@@ -1214,7 +1251,7 @@ int undo_last_add()
     FILE *stagingFile = fopen(".neogit/staging", "r");
     if (stagingFile == NULL)
     {
-        fprintf(stderr, RED"Error opening staging file for reading.\n"RESET);
+        fprintf(stderr, RED "Error opening staging file for reading.\n" RESET);
         return 1;
     }
 
@@ -1222,7 +1259,7 @@ int undo_last_add()
     if (newStagingFile == NULL)
     {
         fclose(stagingFile);
-        fprintf(stderr, RED"Error opening tmp_staging file for writing.\n"RESET);
+        fprintf(stderr, RED "Error opening tmp_staging file for writing.\n" RESET);
         return 1;
     }
 
@@ -1257,8 +1294,8 @@ int is_file_in_staging(const char *filename)
     FILE *staging_file = fopen(".neogit/staging", "r");
     if (staging_file == NULL)
     {
-        perror(RED"Error opening staging file for reading"RESET);
-        return 0; 
+        perror(RED "Error opening staging file for reading" RESET);
+        return 0;
     }
 
     char line[1000];
@@ -1286,7 +1323,7 @@ int status()
     DIR *dir = opendir(".");
     if (dir == NULL)
     {
-        perror(RED"Error opening directory"RESET);
+        perror(RED "Error opening directory" RESET);
         return 1;
     }
 
@@ -1409,7 +1446,7 @@ int run_commit(int argc, char *const argv[])
     fclose(file);
 
     create_commit_file(commit_ID, message);
-    fprintf(stdout, GREEN"Commit successfully with commit ID %d\n"RESET, commit_ID);
+    fprintf(stdout, GREEN "Commit successfully with commit ID %d\n" RESET, commit_ID);
 
     return 0;
 }
@@ -1449,7 +1486,7 @@ bool check_file_directory_exists(char *filepath)
     struct dirent *entry;
     if (dir == NULL)
     {
-        perror(RED"Error opening current directory"RESET);
+        perror(RED "Error opening current directory" RESET);
         return 1;
     }
     while ((entry = readdir(dir)) != NULL)
@@ -1540,7 +1577,7 @@ int create_commit_file(int commit_ID, char *message)
     FILE *file = fopen(commit_filepath, "w");
     if (file == NULL)
     {
-        perror(RED"Error creating commit file in .neogit/commits"RESET);
+        perror(RED "Error creating commit file in .neogit/commits" RESET);
         return 1;
     }
 
@@ -1563,7 +1600,7 @@ int create_commit_file(int commit_ID, char *message)
     struct dirent *entry;
     if (dir == NULL)
     {
-        perror(RED"Error opening current directory"RESET);
+        perror(RED "Error opening current directory" RESET);
         fclose(file);
         return 1;
     }
@@ -1586,7 +1623,7 @@ int create_commit_file(int commit_ID, char *message)
     file = fopen(branchPath, "w");
     if (file == NULL)
     {
-        perror(RED"Error creating commit file in current branch"RESET);
+        perror(RED "Error creating commit file in current branch" RESET);
         return 1;
     }
 
@@ -1653,7 +1690,7 @@ int findHighestFileNumber()
     }
     else
     {
-        perror(RED"Error opening directory"RESET);
+        perror(RED "Error opening directory" RESET);
         return -1; // Error opening directory
     }
 
@@ -1689,7 +1726,7 @@ int showlog()
 
         if (file == NULL)
         {
-            fprintf(stderr, RED"Error opening file: %s\n"RESET, dest);
+            fprintf(stderr, RED "Error opening file: %s\n" RESET, dest);
             return 1;
         }
 
@@ -1707,22 +1744,22 @@ int showlog()
             if (strncmp(line, "datetime:", 9) == 0)
             {
                 sscanf(line, "datetime: %s %s", dateOfCommit, hour);
-                printf(BLUE"Date and Time of commit:"RESET " %s %s\n", dateOfCommit, hour);
+                printf(BLUE "Date and Time of commit:" RESET " %s %s\n", dateOfCommit, hour);
             }
             else if (strncmp(line, "branch:", 7) == 0)
             {
                 sscanf(line, "branch: %s", branch);
-                printf(BLUE"Branch :"RESET " %s\n", branch);
+                printf(BLUE "Branch :" RESET " %s\n", branch);
             }
             else if (strncmp(line, "message:", 8) == 0)
             {
                 sscanf(line, "message: %[^\n]", message);
-                printf(BLUE"Commit message:"RESET" %s\n", message);
+                printf(BLUE "Commit message:" RESET " %s\n", message);
             }
             else if (strncmp(line, "author:", 7) == 0)
             {
                 sscanf(line, "author: %s", personThatCommitted);
-                printf(BLUE"Author:"RESET " %s\n", personThatCommitted);
+                printf(BLUE "Author:" RESET " %s\n", personThatCommitted);
             }
             else if (strncmp(line, "files:", 6) == 0)
             {
@@ -1742,11 +1779,11 @@ int showlog()
                         numbOfCommittedFiles++;
                     }
                 }
-                printf(BLUE"Number of files in this commit:"RESET " %d\n", numbOfCommittedFiles);
+                printf(BLUE "Number of files in this commit:" RESET " %d\n", numbOfCommittedFiles);
             }
         }
 
-        printf(BLUE"Commit ID:"RESET " %d\n", i);
+        printf(BLUE "Commit ID:" RESET " %d\n", i);
         printf("\n");
         fclose(file);
     }
@@ -1801,12 +1838,12 @@ int showlogn(int n)
             if (strncmp(line, "datetime:", 9) == 0)
             {
                 sscanf(line, "datetime: %s %s", dateOfCommit, hour);
-                printf(BLUE"Date and Time of commit:"RESET " %s %s\n", dateOfCommit, hour);
+                printf(BLUE "Date and Time of commit:" RESET " %s %s\n", dateOfCommit, hour);
             }
             else if (strncmp(line, "message:", 8) == 0)
             {
                 sscanf(line, "message: %[^\n]", message);
-                printf(BLUE"Commit message:"RESET " %s\n", message);
+                printf(BLUE "Commit message:" RESET " %s\n", message);
             }
             else if (strncmp(line, "author:", 7) == 0)
             {
@@ -1822,12 +1859,12 @@ int showlogn(int n)
                     }
                     numbOfCommittedFiles++;
                 }
-                printf(BLUE"Number of files in this commit:"RESET " %d\n", numbOfCommittedFiles);
+                printf(BLUE "Number of files in this commit:" RESET " %d\n", numbOfCommittedFiles);
             }
         }
 
-        printf(BLUE"Author of commit:"RESET " %s\n", personThatCommitted);
-        printf(BLUE"Commit ID:"RESET " %d\n", i);
+        printf(BLUE "Author of commit:" RESET " %s\n", personThatCommitted);
+        printf(BLUE "Commit ID:" RESET " %d\n", i);
         printf("\n");
         fclose(file);
     }
@@ -1844,7 +1881,7 @@ int showlogBranch(char *branchname)
         return 1;
     }
 
-    int branchFound = 0; 
+    int branchFound = 0;
 
     for (int i = commitnumb; i >= 1; i--)
     {
@@ -1894,7 +1931,7 @@ int showlogBranch(char *branchname)
         }
         else
         {
-            branchFound = 1; 
+            branchFound = 1;
         }
 
         FILE *file;
@@ -1923,13 +1960,13 @@ int showlogBranch(char *branchname)
             if (strncmp(line, "datetime:", 9) == 0)
             {
                 sscanf(line, "datetime: %s %s", dateOfCommit, hour);
-                printf(BLUE"Date and Time of commit:"RESET " %s %s\n", dateOfCommit, hour);
+                printf(BLUE "Date and Time of commit:" RESET " %s %s\n", dateOfCommit, hour);
             }
             else if (strncmp(line, "message:", 8) == 0)
             {
                 sscanf(line, "message: %[^\n]", message);
-                printf(BLUE"Commit message:"RESET " %s\n", message);
-                printf(BLUE"branch:"RESET " %s\n", branch);
+                printf(BLUE "Commit message:" RESET " %s\n", message);
+                printf(BLUE "branch:" RESET " %s\n", branch);
             }
             else if (strncmp(line, "author:", 7) == 0)
             {
@@ -1946,12 +1983,12 @@ int showlogBranch(char *branchname)
                     }
                     numbOfCommittedFiles++;
                 }
-                printf(BLUE"Number of files in this commit:"RESET " %d\n", numbOfCommittedFiles);
+                printf(BLUE "Number of files in this commit:" RESET " %d\n", numbOfCommittedFiles);
             }
         }
 
-        printf(BLUE"Author of commit:"RESET " %s\n", personThatCommitted);
-        printf(BLUE"Commit ID:"RESET " %d\n", i);
+        printf(BLUE "Author of commit:" RESET " %s\n", personThatCommitted);
+        printf(BLUE "Commit ID:" RESET " %d\n", i);
         printf("\n");
         fclose(file);
     }
@@ -2044,12 +2081,12 @@ int showlogAuthor(char *author)
             if (strncmp(line, "datetime:", 9) == 0)
             {
                 sscanf(line, "datetime: %s %s", dateOfCommit, hour);
-                printf(BLUE"Date and Time of commit:"RESET " %s %s\n", dateOfCommit, hour);
+                printf(BLUE "Date and Time of commit:" RESET " %s %s\n", dateOfCommit, hour);
             }
             else if (strncmp(line, "message:", 8) == 0)
             {
                 sscanf(line, "message: %[^\n]", message);
-                printf(BLUE"Commit message:"RESET " %s\n", message);
+                printf(BLUE "Commit message:" RESET " %s\n", message);
             }
 
             else if (strncmp(line, "files:", 6) == 0)
@@ -2062,12 +2099,12 @@ int showlogAuthor(char *author)
                     }
                     numbOfCommittedFiles++;
                 }
-                printf(BLUE"Number of files in this commit:"RESET " %d\n", numbOfCommittedFiles);
+                printf(BLUE "Number of files in this commit:" RESET " %d\n", numbOfCommittedFiles);
             }
         }
 
-        printf(BLUE"Author of commit:"RESET " %s\n", author);
-        printf(BLUE"Commit ID:"RESET " %d\n", i);
+        printf(BLUE "Author of commit:" RESET " %s\n", author);
+        printf(BLUE "Commit ID:" RESET " %d\n", i);
         printf("\n");
         fclose(file);
     }
@@ -2152,12 +2189,12 @@ int logBefore(char *targetDate)
 
         if (mktime(&commitTime) < mktime(&targetTime))
         {
-            printf(BLUE"Commit ID:"RESET" %d\n", i);
-            printf(BLUE"Branch:"RESET" %s\n", branch);
-            printf(BLUE"Author:"RESET" %s\n", personThatCommitted);
-            printf(BLUE"Commit message:"RESET" %s\n", message);
-            printf(BLUE"Number of files in this commit:"RESET" %d\n", numbOfCommittedFiles);
-            printf(BLUE"Date and Time:"RESET" %s %s\n", dateOfCommit, hour);
+            printf(BLUE "Commit ID:" RESET " %d\n", i);
+            printf(BLUE "Branch:" RESET " %s\n", branch);
+            printf(BLUE "Author:" RESET " %s\n", personThatCommitted);
+            printf(BLUE "Commit message:" RESET " %s\n", message);
+            printf(BLUE "Number of files in this commit:" RESET " %d\n", numbOfCommittedFiles);
+            printf(BLUE "Date and Time:" RESET " %s %s\n", dateOfCommit, hour);
         }
         printf("\n");
     }
@@ -2242,14 +2279,113 @@ int logSince(char *targetDate)
 
         if (mktime(&commitTime) >= mktime(&targetTime))
         {
-            printf(BLUE"Commit ID:"RESET" %d\n", i);
-            printf(BLUE"Branch:"RESET" %s\n", branch);
-            printf(BLUE"Author:"RESET" %s\n", personThatCommitted);
-            printf(BLUE"Commit message:"RESET" %s\n", message);
-            printf(BLUE"Number of files in this commit:"RESET" %d\n", numbOfCommittedFiles);
-            printf(BLUE"Date and Time:"RESET" %s %s\n", dateOfCommit, hour);
+            printf(BLUE "Commit ID:" RESET " %d\n", i);
+            printf(BLUE "Branch:" RESET " %s\n", branch);
+            printf(BLUE "Author:" RESET " %s\n", personThatCommitted);
+            printf(BLUE "Commit message:" RESET " %s\n", message);
+            printf(BLUE "Number of files in this commit:" RESET " %d\n", numbOfCommittedFiles);
+            printf(BLUE "Date and Time:" RESET " %s %s\n", dateOfCommit, hour);
         }
         printf("\n");
+    }
+
+    return 0;
+}
+int logsearch(char *word)
+{
+    int commitnumb = findHighestFileNumber();
+
+    if (!commitnumb)
+    {
+        printf("No commits found!\n");
+        return 1;
+    }
+
+    for (int i = commitnumb; i >= 1; i--)
+    {
+        char dateOfCommit[200];
+        char hour[200];
+        char message[200];
+        char personThatCommitted[200];
+        char branch[200];
+        int numbOfCommittedFiles = 0;
+
+        FILE *file;
+        char dest[200];
+        snprintf(dest, sizeof(dest), ".neogit/commits/%d", i);
+
+        file = fopen(dest, "r");
+
+        if (file == NULL)
+        {
+            fprintf(stderr, RED "Error opening file: %s\n" RESET, dest);
+            return 1;
+        }
+
+        bool commitContainsWord = false;
+
+        char line[MAX_LINE_LENGTH];
+
+        while (fgets(line, sizeof(line), file) != NULL)
+        {
+            int length = strlen(line);
+
+            if (length > 0 && line[length - 1] == '\n')
+            {
+                line[length - 1] = '\0';
+            }
+
+            if (strncmp(line, "datetime:", 9) == 0)
+            {
+                sscanf(line, "datetime: %s %s", dateOfCommit, hour);
+            }
+            else if (strncmp(line, "branch:", 7) == 0)
+            {
+                sscanf(line, "branch: %s", branch);
+            }
+            else if (strncmp(line, "message:", 8) == 0)
+            {
+                sscanf(line, "message: %[^\n]", message);
+
+                char *wordPosition = strstr(message, word);
+                if (wordPosition != NULL)
+                {
+                    commitContainsWord = true;
+                    printf("\n");
+                    printf(BLUE "Commit message:" RESET " ");
+                    printf("%.*s", (int)(wordPosition - message), message);
+                    printf(YELLOW "%s" RESET, word);
+                    printf("%s\n", wordPosition + strlen(word));
+                }
+            }
+            else if (strncmp(line, "author:", 7) == 0)
+            {
+                sscanf(line, "author: %s", personThatCommitted);
+            }
+            else if (strncmp(line, "files:", 6) == 0)
+            {
+                while (fgets(line, sizeof(line), file) != NULL)
+                {
+                    if (line[0] == '\n' || line[0] == '\0')
+                    {
+                        break;
+                    }
+                    numbOfCommittedFiles++;
+                }
+            }
+        }
+
+        if (commitContainsWord)
+        {
+            printf(BLUE "Date and Time of commit:" RESET " %s %s\n", dateOfCommit, hour);
+            printf(BLUE "Branch :" RESET " %s\n", branch);
+            printf(BLUE "Author:" RESET " %s\n", personThatCommitted);
+            printf(BLUE "Number of files in this commit:" RESET " %d\n", numbOfCommittedFiles);
+            printf(BLUE "Commit ID:" RESET " %d\n", i);
+            printf("\n");
+        }
+
+        fclose(file);
     }
 
     return 0;
@@ -2276,27 +2412,27 @@ int branch(char *branchName)
 
     if (mkdir(branchPath, 0755) != 0)
     {
-        perror(RED"Error creating branch directory"RESET);
+        perror(RED "Error creating branch directory" RESET);
         return 1;
     }
 
     FILE *file = fopen(".neogit/currbranch", "w");
     if (file == NULL)
     {
-        perror(RED"Error opening .neogit/currbranch for writing"RESET);
+        perror(RED "Error opening .neogit/currbranch for writing" RESET);
         return 1;
     }
 
     if (fprintf(file, "%s", branchName) < 0)
     {
-        perror(RED"Error writing to .neogit/currbranch"RESET);
+        perror(RED "Error writing to .neogit/currbranch" RESET);
         fclose(file);
         return 1;
     }
 
     fclose(file);
 
-    printf("Branch "YELLOW"%s"RESET" created successfully.\n", branchName);
+    printf("Branch " YELLOW "%s" RESET " created successfully.\n", branchName);
 
     int highestFileNumber = findHighestFileNumber();
 
@@ -2307,13 +2443,13 @@ int branch(char *branchName)
 
         copyFolder(commitPath, branchPath);
 
-        printf(GREEN"Last commit added to branch '%s'.\n"RESET, branchPath);
+        printf(GREEN "Last commit added to branch '%s'.\n" RESET, branchPath);
     }
     else
     {
         printf("No commits found.\n");
     }
-    printf("current branch ->"YELLOW" %s\n"RESET, get_current_branch());
+    printf("current branch ->" YELLOW " %s\n" RESET, get_current_branch());
     return 0;
 }
 int showBranches()
@@ -2321,7 +2457,6 @@ int showBranches()
     DIR *dir;
     struct dirent *ent;
     const char *branchesDir = ".neogit/branches";
-
     if ((dir = opendir(branchesDir)) != NULL)
     {
         printf("Branches:\n");
@@ -2341,12 +2476,11 @@ int showBranches()
                 printf("%s", get_current_branch());
             }
         }
-
         closedir(dir);
     }
     else
     {
-        perror(RED"Error opening branches directory"RESET);
+        perror(RED "Error opening branches directory" RESET);
     }
     return 0;
 }
@@ -2357,15 +2491,12 @@ int checkout(char *branchname)
 {
     DIR *dir;
     struct dirent *ent;
-
     dir = opendir(".neogit/branches");
-
     if (dir == NULL)
     {
-        perror(RED"Error opening branches directory"RESET);
+        perror(RED "Error opening branches directory" RESET);
         return 1;
     }
-
     while ((ent = readdir(dir)) != NULL)
     {
         if (ent->d_type == DT_DIR && strcmp(ent->d_name, ".") != 0 && strcmp(ent->d_name, "..") != 0)
@@ -2375,30 +2506,27 @@ int checkout(char *branchname)
                 FILE *file = fopen(".neogit/currbranch", "w");
                 if (file == NULL)
                 {
-                    perror(RED"Error opening .neogit/currbranch for writing"RESET);
+                    perror(RED "Error opening .neogit/currbranch for writing" RESET);
                     return 1;
                 }
-
                 if (fprintf(file, "%s", branchname) < 0)
                 {
-                    perror(RED"Error writing to .neogit/currbranch"RESET);
+                    perror(RED "Error writing to .neogit/currbranch" RESET);
                     fclose(file);
                     return 1;
                 }
-
                 fclose(file);
-                printf(GREEN"Switched to branch '%s'.\n"RESET, branchname);
+                printf(GREEN "Switched to branch '%s'\n" RESET, branchname);
+                printf("Working directory updated based on " YELLOW "commit %d\n" RESET, findHighestFileNumberbranch(branchname));
                 closedir(dir);
                 return 0;
             }
         }
     }
-
-    fprintf(stderr, RED"Error: Branch '%s' not found.\n"RESET, branchname);
+    fprintf(stderr, RED "Error: Branch '%s' not found.\n" RESET, branchname);
     closedir(dir);
     return 1;
 }
-// int comcheckout(char *commitID)
 
 // alias
 
@@ -2407,20 +2535,16 @@ void add_alias(const char *alias, const char *command)
     FILE *file = fopen(ALIAS_FILE, "a");
     if (file == NULL)
     {
-        perror(RED"Error opening alias file for writing"RESET);
+        perror(RED "Error opening alias file for writing" RESET);
         exit(EXIT_FAILURE);
     }
-
-    // gotta change the ./neogit here to neogit in release
-
     if (strncmp(command, "./neogit", 8) != 0)
     {
         printf("You cannot add an invalid command as an alias!\n");
         return;
     }
-
     fprintf(file, "%s=%s\n", alias, command);
-    printf(GREEN"Alias added successfully: "RESET"%s -> %s\n", alias, command);
+    printf(GREEN "Alias added successfully: " RESET "%s -> %s\n", alias, command);
     fclose(file);
 }
 void read_aliases()
@@ -2428,7 +2552,7 @@ void read_aliases()
     FILE *file = fopen(ALIAS_FILE, "r");
     if (file == NULL)
     {
-        perror(RED"Error opening alias file for reading"RESET);
+        perror(RED "Error opening alias file for reading" RESET);
         exit(EXIT_FAILURE);
     }
 
@@ -2451,7 +2575,7 @@ void execute_alias(const char *alias)
     FILE *file = fopen(ALIAS_FILE, "r");
     if (file == NULL)
     {
-        perror(RED"Error opening alias file for reading"RESET);
+        perror(RED "Error opening alias file for reading" RESET);
         return;
     }
 
@@ -2484,7 +2608,7 @@ void add_shortcut(const char *shortcut_name, const char *shortcut_message)
     FILE *file = fopen(".neogit/shortcuts", "a");
     if (file == NULL)
     {
-        perror(RED"Error opening shortcuts file for writing"RESET);
+        perror(RED "Error opening shortcuts file for writing" RESET);
         exit(EXIT_FAILURE);
     }
 
@@ -2496,7 +2620,7 @@ const char *get_shortcut_message(const char *shortcut_name)
     FILE *file = fopen(".neogit/shortcuts", "r");
     if (file == NULL)
     {
-        perror(RED"Error opening shortcuts file for reading"RESET);
+        perror(RED "Error opening shortcuts file for reading" RESET);
         exit(EXIT_FAILURE);
     }
 
@@ -2518,25 +2642,21 @@ const char *get_shortcut_message(const char *shortcut_name)
 int replace_shortcut(const char *shortcut_name, const char *new_message)
 {
     const char *shortcuts_file_path = ".neogit/shortcuts";
-
     FILE *file = fopen(shortcuts_file_path, "r");
     if (file == NULL)
     {
-        perror(RED"Error opening shortcuts file for reading"RESET);
+        perror(RED "Error opening shortcuts file for reading" RESET);
         exit(EXIT_FAILURE);
     }
-
     FILE *temp_file = fopen(".neogit/temp_shortcuts", "w");
     if (temp_file == NULL)
     {
-        perror(RED"Error opening temp file for writing"RESET);
+        perror(RED "Error opening temp file for writing" RESET);
         fclose(file);
         exit(EXIT_FAILURE);
     }
-
     char line[MAX_MESSAGE_LENGTH + 22];
     int found = 0;
-
     while (fgets(line, sizeof(line), file) != NULL)
     {
         char *stored_shortcut = strtok(line, "=");
@@ -2552,10 +2672,8 @@ int replace_shortcut(const char *shortcut_name, const char *new_message)
             fprintf(temp_file, "%s", line);
         }
     }
-
     fclose(file);
     fclose(temp_file);
-
     if (!found)
     {
         fprintf(stdout, "Shortcut not found: %s\n", shortcut_name);
@@ -2565,9 +2683,7 @@ int replace_shortcut(const char *shortcut_name, const char *new_message)
 
     remove(shortcuts_file_path);
     rename(".neogit/temp_shortcuts", shortcuts_file_path);
-
-    printf(GREEN"Shortcut replaced successfully: %s -> %s\n"RESET, shortcut_name, new_message);
-
+    printf(GREEN "Shortcut replaced successfully: %s -> %s\n" RESET, shortcut_name, new_message);
     return 0;
 }
 int remove_shortcut(const char *shortcut_name)
@@ -2577,18 +2693,17 @@ int remove_shortcut(const char *shortcut_name)
     FILE *file = fopen(shortcuts_file_path, "r");
     if (file == NULL)
     {
-        perror(RED"Error opening shortcuts file for reading"RESET);
+        perror(RED "Error opening shortcuts file for reading" RESET);
         return 1;
     }
 
     FILE *temp_file = fopen(".neogit/temp_shortcuts", "w");
     if (temp_file == NULL)
     {
-        perror(RED"Error opening temp file for writing"RESET);
+        perror(RED "Error opening temp file for writing" RESET);
         fclose(file);
-        return 1; // Return 1 to indicate an error
+        return 1;
     }
-
     char line[MAX_MESSAGE_LENGTH + 52];
     int found = 0;
 
@@ -2609,18 +2724,15 @@ int remove_shortcut(const char *shortcut_name)
 
     fclose(file);
     fclose(temp_file);
-
     if (!found)
     {
-        fprintf(stdout, RED"Shortcut not found: %s\n"RESET, shortcut_name);
+        fprintf(stdout, RED "Shortcut not found: %s\n" RESET, shortcut_name);
         remove(".neogit/temp_shortcuts");
         return 1;
     }
-
     remove(shortcuts_file_path);
     rename(".neogit/temp_shortcuts", shortcuts_file_path);
-
-    printf(GREEN"Shortcut removed successfully: %s\n"RESET, shortcut_name);
+    printf(GREEN "Shortcut removed successfully: %s\n" RESET, shortcut_name);
     return 0;
 }
 
@@ -2670,7 +2782,6 @@ int neogit_diff(const char *file1, const char *file2, int line1_start, int line1
         return 1;
     }
 
-    // Move to the specified line numbers
     for (int i = 1; i < line1_start; ++i)
         if (fgets(buffer1, sizeof(buffer1), fp1) == NULL)
             break;
@@ -2689,7 +2800,7 @@ int neogit_diff(const char *file1, const char *file2, int line1_start, int line1
 
         if (feof(fp1) && feof(fp2))
         {
-            break; // Both files have reached the end
+            break;
         }
         if (fgets(buffer1, sizeof(buffer1), fp1) != NULL)
         {
@@ -2700,12 +2811,10 @@ int neogit_diff(const char *file1, const char *file2, int line1_start, int line1
         {
             lineNumber2++;
         }
-
         if ((line1_end > 0 && lineNumber1 > line1_end) || (line2_end > 0 && lineNumber2 > line2_end))
         {
             break;
         }
-
         if (strcmp(buffer1, buffer2) != 0)
         {
             if (!foundDifference)
@@ -2722,10 +2831,8 @@ int neogit_diff(const char *file1, const char *file2, int line1_start, int line1
             printf("\n");
         }
     }
-
     fclose(fp1);
     fclose(fp2);
-
     return 0;
 }
 
@@ -2749,18 +2856,15 @@ int create_tag(const char *tag_name, const char *message, int cgiven, int commit
 
     if (!force && access(tag_path, F_OK) == 0)
     {
-        fprintf(stderr, RED"Error: Tag '%s' already exists. Use -f to force.\n"RESET, tag_name);
+        fprintf(stderr, RED "Error: Tag '%s' already exists. Use -f to force.\n" RESET, tag_name);
         return 1;
     }
-
     FILE *tag_file;
-
     if ((tag_file = fopen(tag_path, "w")) == NULL)
     {
-        fprintf(stderr, RED"Error creating tag file: %s\n"RESET, tag_path);
+        fprintf(stderr, RED "Error creating tag file: %s\n" RESET, tag_path);
         return 1;
     }
-
     time_t t;
     struct tm *tm_info;
 
@@ -2782,7 +2886,7 @@ int create_tag(const char *tag_name, const char *message, int cgiven, int commit
 
     fclose(tag_file);
 
-    printf(GREEN"Tag '%s' created successfully.\n"RESET, tag_name);
+    printf(GREEN "Tag '%s' created successfully.\n" RESET, tag_name);
 
     return 0;
 }
@@ -2795,7 +2899,7 @@ int showAllTags()
     DIR *dir = opendir(".neogit/tags");
     if (dir == NULL)
     {
-        perror(RED"Error opening tags directory"RESET);
+        perror(RED "Error opening tags directory" RESET);
         return 1;
     }
 
@@ -2814,9 +2918,7 @@ int showAllTags()
             tagCount++;
         }
     }
-
     closedir(dir);
-
     qsort(tags, tagCount, sizeof(char *), compareTags);
 
     for (int i = 0; i < tagCount; i++)
@@ -2824,7 +2926,6 @@ int showAllTags()
         printf("%s\n", tags[i]);
         free(tags[i]);
     }
-
     free(tags);
     return 0;
 }
@@ -2837,7 +2938,7 @@ int showTagContent(const char *tagName)
     FILE *tagFile = fopen(filePath, "r");
     if (tagFile == NULL)
     {
-        perror(RED"Error opening tag file"RESET);
+        perror(RED "Error opening tag file" RESET);
         return 1;
     }
     char line[256];
@@ -2861,7 +2962,7 @@ int neogit_grep(const char *file, const char *word, const char *commitId, int pr
 
     if ((fp = fopen(file, "r")) == NULL)
     {
-        fprintf(stderr, RED"Error opening file: %s\n"RESET, file);
+        fprintf(stderr, RED "Error opening file: %s\n" RESET, file);
         return 1;
     }
 
@@ -2870,6 +2971,7 @@ int neogit_grep(const char *file, const char *word, const char *commitId, int pr
         lineNumber++;
 
         char *position = strstr(line, word);
+        
         if (position != NULL)
         {
             found = 1;
@@ -2881,10 +2983,8 @@ int neogit_grep(const char *file, const char *word, const char *commitId, int pr
 
             fwrite(line, 1, position - line, stdout);
 
-            // Print the word in yellow
             printf(RED "%.*s" RESET, (int)strlen(word), position);
 
-            // Print the rest of the line
             printf("%s", position + strlen(word));
         }
     }
