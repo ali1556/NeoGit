@@ -10,6 +10,7 @@
 #include <time.h>
 #include <libgen.h>
 
+
 #define MAX_MESSAGE_LENGTH 73
 #define MAX_FILENAME_LENGTH 257
 #define MAX_LINE_LENGTH 1025
@@ -85,7 +86,7 @@ int showBranches();
 
 //
 
-int comcheckout(char *commitID);
+int removeCommitsGreaterThan(int commitID);
 int checkout(char *branchname);
 
 //
@@ -103,13 +104,6 @@ int remove_shortcut(const char *shortcut_name);
 
 //
 
-void createRevertCommit(int commitID, const char *message);
-void deleteCommitsAfter(char *commitID);
-void deleteCommitsByID(char *commitID);
-int revert(char *commitID);
-
-//
-
 int neogit_diff(const char *file1, const char *file2, int line1_start, int line1_end, int line2_start, int line2_end);
 int compareLines(const char *line1, const char *line2);
 
@@ -123,6 +117,10 @@ int showTagContent(const char *tagName);
 //
 
 int neogit_grep(const char *file, const char *word, const char *commitId, int printLineNumber);
+
+// 
+
+
 //////////////////////////MAIN FUNCTION////////////////////////////
 
 int UserNameIsGlobal()
@@ -319,6 +317,7 @@ int main(int argc, char *argv[])
         fprintf(stdout, "Invalid command!\n");
         return 1;
     }
+
 
     else if (strcmp(argv[1], "init") == 0)
     {
@@ -2487,30 +2486,103 @@ int showBranches()
 
 // checkout
 
-int checkout(char *branchname)
-{
+int removeCommitsGreaterThan(int commitID) {
     DIR *dir;
     struct dirent *ent;
+
     dir = opendir(".neogit/branches");
-    if (dir == NULL)
-    {
+    if (dir == NULL) {
         perror(RED "Error opening branches directory" RESET);
         return 1;
     }
-    while ((ent = readdir(dir)) != NULL)
-    {
-        if (ent->d_type == DT_DIR && strcmp(ent->d_name, ".") != 0 && strcmp(ent->d_name, "..") != 0)
-        {
-            if (strcmp(ent->d_name, branchname) == 0)
-            {
+
+    while ((ent = readdir(dir)) != NULL) {
+        if (ent->d_type == DT_DIR && strcmp(ent->d_name, ".") != 0 && strcmp(ent->d_name, "..") != 0) {
+            char branchPath[MAX_FILENAME_LENGTH];
+            snprintf(branchPath, sizeof(branchPath), ".neogit/branches/%s", ent->d_name);
+
+            DIR *branchDir = opendir(branchPath);
+            if (branchDir == NULL) {
+                perror(RED "Error opening branch directory" RESET);
+                closedir(dir);
+                return 1;
+            }
+
+            struct dirent *branchEnt;
+            while ((branchEnt = readdir(branchDir)) != NULL) {
+                if (branchEnt->d_type == DT_REG) {
+                    int fileCommitID = atoi(branchEnt->d_name);
+                    if (fileCommitID > commitID) {
+                        char commitPath[MAX_FILENAME_LENGTH];
+                        snprintf(commitPath, sizeof(commitPath), "%s/%s", branchPath, branchEnt->d_name);
+                        if (remove(commitPath) != 0) {
+                            perror(RED "Error removing commit file" RESET);
+                            closedir(branchDir);
+                            closedir(dir);
+                            return 1;
+                        }
+                    }
+                }
+            }
+            closedir(branchDir);
+        }
+    }
+
+    closedir(dir);
+
+    DIR *commitsDir = opendir(".neogit/commits");
+    if (commitsDir == NULL) {
+        perror(RED "Error opening commits directory" RESET);
+        return 1;
+    }
+
+    struct dirent *commitEnt;
+    while ((commitEnt = readdir(commitsDir)) != NULL) {
+        if (commitEnt->d_type == DT_REG) {
+            int fileCommitID = atoi(commitEnt->d_name);
+            if (fileCommitID > commitID) {
+                char commitPath[MAX_FILENAME_LENGTH];
+                snprintf(commitPath, sizeof(commitPath), ".neogit/commits/%s", commitEnt->d_name);
+                if (remove(commitPath) != 0) {
+                    perror(RED "Error removing commit file" RESET);
+                    closedir(commitsDir);
+                    return 1;
+                }
+            }
+        }
+    }
+
+    closedir(commitsDir);
+    return 0;
+}
+int checkout(char *branchname) {
+    int commitID = atoi(branchname);
+    if (commitID > 0) {
+        printf("Checking out to commit ID: %d\n", commitID);
+        if (removeCommitsGreaterThan(commitID) != 0) {
+            fprintf(stderr, RED "Error removing commits with IDs greater than %d\n" RESET, commitID);
+            return 1;
+        }
+        printf("Working directory updated based on commit %d\n", commitID);
+        return 0;
+    }
+
+    DIR *dir;
+    struct dirent *ent;
+    dir = opendir(".neogit/branches");
+    if (dir == NULL) {
+        perror(RED "Error opening branches directory" RESET);
+        return 1;
+    }
+    while ((ent = readdir(dir)) != NULL) {
+        if (ent->d_type == DT_DIR && strcmp(ent->d_name, ".") != 0 && strcmp(ent->d_name, "..") != 0) {
+            if (strcmp(ent->d_name, branchname) == 0) {
                 FILE *file = fopen(".neogit/currbranch", "w");
-                if (file == NULL)
-                {
+                if (file == NULL) {
                     perror(RED "Error opening .neogit/currbranch for writing" RESET);
                     return 1;
                 }
-                if (fprintf(file, "%s", branchname) < 0)
-                {
+                if (fprintf(file, "%s", branchname) < 0) {
                     perror(RED "Error writing to .neogit/currbranch" RESET);
                     fclose(file);
                     return 1;
@@ -2527,7 +2599,6 @@ int checkout(char *branchname)
     closedir(dir);
     return 1;
 }
-
 // alias
 
 void add_alias(const char *alias, const char *command)
@@ -2971,7 +3042,7 @@ int neogit_grep(const char *file, const char *word, const char *commitId, int pr
         lineNumber++;
 
         char *position = strstr(line, word);
-        
+
         if (position != NULL)
         {
             found = 1;
